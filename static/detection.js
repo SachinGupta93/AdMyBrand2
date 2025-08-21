@@ -18,7 +18,7 @@ class DetectionEngine {
             'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch',
             'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard',
             'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase',
-            'scissors', 'teddy bear', 'hair drier', 'toothbrush'
+            'scissors', 'teddy bear', 'hair drier', 'toothbrush', 'bottle'
         ];
         
         this.colors = [
@@ -28,8 +28,14 @@ class DetectionEngine {
         
         // Performance metrics
         this.metrics = {
-            detections: 0,
+            frameCount: 0,
+            totalDetections: 0,
+            avgDetectionsPerFrame: 0,
+            latencies: [],
             avgLatency: 0,
+            medianLatency: 0,
+            p95Latency: 0,
+            meanLatency: 0,
             fps: 0,
             lastFrameTime: Date.now()
         };
@@ -57,7 +63,19 @@ class DetectionEngine {
             try {
                 this.session = await ort.InferenceSession.create(modelUrl);
                 this.isLoaded = true;
+                
+                // Debug model input/output info
                 console.log('✅ Local YOLOv5 model loaded successfully!');
+                console.log('📋 Model inputs:', this.session.inputNames);
+                console.log('📋 Model outputs:', this.session.outputNames);
+                
+                // Check input specifications
+                if (this.session.inputNames.length > 0) {
+                    const inputName = this.session.inputNames[0];
+                    const inputMetadata = this.session.inputMetadata;
+                    console.log(`📊 Input "${inputName}" metadata:`, inputMetadata);
+                }
+                
                 return true;
             } catch (modelError) {
                 console.error('❌ Local model failed to load:', modelError);
@@ -101,7 +119,7 @@ class DetectionEngine {
 
             // Calculate metrics
             const latency = performance.now() - startTime;
-            this.updateMetrics(latency);
+            this.updateMetrics(latency, detections.length);
 
             return detections;
 
@@ -117,8 +135,18 @@ class DetectionEngine {
         // Preprocess image
         const inputTensor = this.preprocessImage(imageData);
         
+        if (!inputTensor) {
+            console.warn('⚠️ No input tensor, returning mock detections');
+            return this.generateMockDetections();
+        }
+        
+        // Get the correct input name from the model
+        const inputName = this.session.inputNames[0];
+        
         // Run inference
-        const feeds = { images: inputTensor };
+        const feeds = {};
+        feeds[inputName] = inputTensor;
+        
         const results = await this.session.run(feeds);
         
         // Post-process results
@@ -128,6 +156,11 @@ class DetectionEngine {
     }
 
     preprocessImage(imageData) {
+        if (!imageData || !imageData.data) {
+            console.warn('⚠️ No image data provided, using fallback');
+            return null;
+        }
+        
         const { data, width, height } = imageData;
         
         // Resize to model input size (640x640)
@@ -155,7 +188,43 @@ class DetectionEngine {
             float32Data[i + 2 * this.inputSize * this.inputSize] = resizedData.data[i * 4 + 2] / 255.0; // B
         }
         
-        return new ort.Tensor('float32', float32Data, [1, 3, this.inputSize, this.inputSize]);
+        // Create tensor - model expects float16, so create float16 tensor
+        
+        // Convert to Float16Array for proper float16 tensor
+        const float16Buffer = new ArrayBuffer(float32Data.length * 2);
+        const float16View = new DataView(float16Buffer);
+        
+        for (let i = 0; i < float32Data.length; i++) {
+            const float16Bits = this.float32ToFloat16(float32Data[i]);
+            float16View.setUint16(i * 2, float16Bits, true); // little endian
+        }
+        
+        const float16Array = new Uint16Array(float16Buffer);
+        return new ort.Tensor('float16', float16Array, [1, 3, this.inputSize, this.inputSize]);
+    }
+
+    // Convert float32 to float16 (IEEE 754 half precision)
+    float32ToFloat16(value) {
+        const floatView = new Float32Array(1);
+        const int32View = new Int32Array(floatView.buffer);
+        
+        floatView[0] = value;
+        const x = int32View[0];
+        
+        let bits = (x >> 16) & 0x8000; // Sign bit
+        let m = (x >> 12) & 0x007ff; // Mantissa
+        let e = (x >> 23) & 0xff; // Exponent
+        
+        if (e < 103) return bits; // Too small
+        if (e > 142) return bits | 0x7c00; // Infinity
+        if (e < 113) {
+            m |= 0x0800; // Add implicit 1
+            bits |= (m >> (114 - e)) + ((m >> (113 - e)) & 1);
+            return bits;
+        }
+        bits |= ((e - 112) << 10) | (m >> 1);
+        bits += m & 1; // Round
+        return bits;
     }
 
     postprocessResults(results, originalWidth, originalHeight) {
@@ -165,11 +234,14 @@ class DetectionEngine {
         // YOLOv5 output format: [batch, 25200, 85] (for COCO)
         const data = output.data;
         const rows = 25200;
+        const confidenceThreshold = 0.5; // Lower threshold to see more objects
+        const classThreshold = 0.6; // Lower class confidence
         
         for (let i = 0; i < rows; i++) {
             const confidence = data[i * 85 + 4]; // Objectness score
             
-            if (confidence > 0.5) {
+            // First filter: high objectness threshold
+            if (confidence > confidenceThreshold) {
                 const x = data[i * 85 + 0];
                 const y = data[i * 85 + 1];
                 const width = data[i * 85 + 2];
@@ -187,7 +259,9 @@ class DetectionEngine {
                 }
                 
                 const finalScore = confidence * maxScore;
-                if (finalScore > 0.3) {
+                
+                // Second filter: high final confidence
+                if (finalScore > classThreshold) {
                     detections.push({
                         x: (x - width / 2) / this.inputSize,
                         y: (y - height / 2) / this.inputSize,
@@ -201,7 +275,55 @@ class DetectionEngine {
             }
         }
         
-        return detections;
+        // Apply Non-Maximum Suppression and limit detections
+        const filteredDetections = this.applyNMS(detections);
+        
+        // Limit to reasonable number of detections
+        return filteredDetections.slice(0, 10);
+    }
+
+    applyNMS(detections, iouThreshold = 0.5) {
+        if (detections.length === 0) return [];
+        
+        // Sort by confidence
+        detections.sort((a, b) => b.confidence - a.confidence);
+        
+        const kept = [];
+        const suppressed = new Set();
+        
+        for (let i = 0; i < detections.length; i++) {
+            if (suppressed.has(i)) continue;
+            
+            kept.push(detections[i]);
+            
+            // Suppress overlapping detections
+            for (let j = i + 1; j < detections.length; j++) {
+                if (suppressed.has(j)) continue;
+                
+                const iou = this.calculateIOU(detections[i], detections[j]);
+                if (iou > iouThreshold) {
+                    suppressed.add(j);
+                }
+            }
+        }
+        
+        return kept;
+    }
+
+    calculateIOU(box1, box2) {
+        const x1 = Math.max(box1.x, box2.x);
+        const y1 = Math.max(box1.y, box2.y);
+        const x2 = Math.min(box1.x + box1.width, box2.x + box2.width);
+        const y2 = Math.min(box1.y + box1.height, box2.y + box2.height);
+        
+        if (x2 <= x1 || y2 <= y1) return 0;
+        
+        const intersection = (x2 - x1) * (y2 - y1);
+        const area1 = box1.width * box1.height;
+        const area2 = box2.width * box2.height;
+        const union = area1 + area2 - intersection;
+        
+        return intersection / union;
     }
 
     generateMockDetections() {
@@ -238,10 +360,25 @@ class DetectionEngine {
         return mockDetections;
     }
 
-    updateMetrics(latency) {
-        this.metrics.detections++;
-        this.metrics.avgLatency = (this.metrics.avgLatency + latency) / 2;
+    updateMetrics(latency, detectionsCount = 0) {
+        this.metrics.frameCount++;
+        this.metrics.totalDetections += detectionsCount;
+        this.metrics.avgDetectionsPerFrame = this.metrics.totalDetections / this.metrics.frameCount;
         
+        // Track latencies
+        this.metrics.latencies.push(latency);
+        if (this.metrics.latencies.length > 100) {
+            this.metrics.latencies.shift(); // Keep only last 100 measurements
+        }
+        
+        // Calculate statistics
+        const sortedLatencies = [...this.metrics.latencies].sort((a, b) => a - b);
+        this.metrics.meanLatency = this.metrics.latencies.reduce((a, b) => a + b, 0) / this.metrics.latencies.length;
+        this.metrics.medianLatency = sortedLatencies[Math.floor(sortedLatencies.length / 2)];
+        this.metrics.p95Latency = sortedLatencies[Math.floor(sortedLatencies.length * 0.95)];
+        this.metrics.avgLatency = this.metrics.meanLatency;
+        
+        // FPS calculation
         const now = Date.now();
         const timeDiff = (now - this.metrics.lastFrameTime) / 1000;
         this.metrics.fps = timeDiff > 0 ? 1 / timeDiff : 0;
@@ -250,40 +387,63 @@ class DetectionEngine {
 
     getMetrics() {
         return {
-            ...this.metrics,
+            frameCount: this.metrics.frameCount,
+            totalDetections: this.metrics.totalDetections,
+            avgDetectionsPerFrame: Math.round(this.metrics.avgDetectionsPerFrame * 100) / 100,
             avgLatency: Math.round(this.metrics.avgLatency),
+            medianLatency: Math.round(this.metrics.medianLatency || 0),
+            p95Latency: Math.round(this.metrics.p95Latency || 0),
+            meanLatency: Math.round(this.metrics.meanLatency || 0),
             fps: Math.round(this.metrics.fps * 10) / 10
         };
     }
 
     drawDetections(ctx, detections, canvasWidth, canvasHeight) {
-        ctx.strokeStyle = '#FFFFFF';
-        ctx.fillStyle = '#FFFFFF';
+        if (!detections || detections.length === 0) return;
+        
+        // Only log drawing info for first few detections to avoid spam
+        if (!this.loggedDrawing || this.loggedDrawing < 3) {
+            console.log(`🎨 Drawing ${detections.length} detections on ${canvasWidth}x${canvasHeight} canvas`);
+            this.loggedDrawing = (this.loggedDrawing || 0) + 1;
+        }
+        
         ctx.lineWidth = 3;
         ctx.font = 'bold 16px Arial';
         
-        detections.forEach(detection => {
+        detections.forEach((detection, index) => {
             const x = detection.x * canvasWidth;
             const y = detection.y * canvasHeight;
             const width = detection.width * canvasWidth;
             const height = detection.height * canvasHeight;
             
+            // Use different colors for different objects
+            const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F'];
+            const color = colors[index % colors.length];
+            
             // Draw bounding box
-            ctx.strokeStyle = detection.color;
+            ctx.strokeStyle = color;
             ctx.strokeRect(x, y, width, height);
             
-            // Draw label background
-            const label = `${detection.class} ${Math.round(detection.confidence * 100)}%`;
-            const labelWidth = ctx.measureText(label).width + 10;
-            const labelHeight = 25;
+            // Create label with object name and confidence
+            const confidence = Math.round(detection.confidence * 100);
+            const label = `${detection.class} ${confidence}%`;
             
-            ctx.fillStyle = detection.color;
+            // Measure text for background
+            const textMetrics = ctx.measureText(label);
+            const labelWidth = textMetrics.width + 12;
+            const labelHeight = 22;
+            
+            // Draw label background
+            ctx.fillStyle = color;
             ctx.fillRect(x, y - labelHeight, labelWidth, labelHeight);
             
             // Draw label text
             ctx.fillStyle = '#FFFFFF';
-            ctx.fillText(label, x + 5, y - 8);
+            ctx.textAlign = 'left';
+            ctx.fillText(label, x + 6, y - 6);
         });
+        
+        ctx.textAlign = 'left'; // Reset text alignment
     }
 }
 

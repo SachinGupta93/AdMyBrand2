@@ -42,6 +42,57 @@
         .status.connected { background: #E8F5E8; color: #2E7D32; }
         .status.connecting { background: #FFF3E0; color: #F57C00; }
         .status.disconnected { background: #FFEBEE; color: #C62828; }
+        
+        /* Detection Display Container */
+        .detection-container {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 15px 0;
+            min-height: 80px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .detection-header {
+            font-weight: bold; 
+            margin-bottom: 15px; 
+            color: white;
+            display: flex; 
+            align-items: center;
+            font-size: 16px;
+        }
+        .detection-list {
+            display: flex; 
+            flex-wrap: wrap; 
+            gap: 10px; 
+            min-height: 40px;
+            align-items: center;
+        }
+        .detection-item {
+            background: rgba(255,255,255,0.9); 
+            color: #333; 
+            padding: 8px 16px;
+            border-radius: 25px; 
+            font-size: 14px; 
+            font-weight: 600;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            border: 2px solid rgba(255,255,255,0.3);
+            animation: fadeInScale 0.3s ease-out;
+            transition: transform 0.2s ease;
+        }
+        .detection-item:hover {
+            transform: scale(1.05);
+        }
+        @keyframes fadeInScale {
+            0% { opacity: 0; transform: scale(0.8); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        .detection-empty {
+            color: rgba(255,255,255,0.8); 
+            font-style: italic;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -58,10 +109,22 @@
                 <video id="localVideo" autoplay muted playsinline></video>
                 <canvas id="overlayCanvas" class="overlay-canvas"></canvas>
             </div>
+            
+            <!-- Object Detection Display -->
+            <div class="detection-container">
+                <div class="detection-header">
+                    🔍 Currently Detected Objects:
+                </div>
+                <div id="detection-list" class="detection-list">
+                    <span class="detection-empty">No objects detected yet...</span>
+                </div>
+            </div>           
             <div class="controls">
                 <button id="startBtn" class="btn">📹 Start Camera</button>
                 <button id="stopBtn" class="btn danger" disabled>⏹️ Stop</button>
+                <button id="testDetectionBtn" class="btn">🔍 Test Detection</button>
                 <button id="benchBtn" class="btn">📊 Run Benchmark</button>
+                <button id="downloadBtn" class="btn">💾 Download Metrics</button>
             </div>
         </div>
         
@@ -83,6 +146,8 @@
         </div>
     </div>
 
+    <script src="/static/detection_config.js"></script>
+    <script src="/static/gemini_detection.js"></script>
     <script src="/static/detection.js"></script>
     <script src="/static/app.js"></script>
 </body>

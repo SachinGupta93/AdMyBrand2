@@ -15,10 +15,14 @@ from io import BytesIO
 import base64
 import socket
 import ssl
+from dotenv import load_dotenv
 
 import aiohttp
 from aiohttp import web, WSMsgType
 import qrcode
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Add server directory to path to allow relative imports
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -312,6 +316,17 @@ class DetectionServer:
         local_ip = self.get_local_ip()
         return web.json_response({'ip': local_ip})
     
+    async def config_handler(self, request):
+        """Serve detection configuration from environment variables"""
+        config = {
+            'engine': os.getenv('DETECTION_ENGINE', 'gemini'),
+            'openrouter_api_key': os.getenv('OPENROUTER_API_KEY', ''),
+            'detection_interval': int(os.getenv('DETECTION_INTERVAL', '2000')),
+            'confidence_threshold': float(os.getenv('CONFIDENCE_THRESHOLD', '0.5')),
+            'max_detections': int(os.getenv('MAX_DETECTIONS', '8'))
+        }
+        return web.json_response(config)
+    
     async def metrics_handler(self, request):
         """API endpoint for metrics"""
         metrics = self.metrics_collector.get_current_metrics()
@@ -361,6 +376,7 @@ class DetectionServer:
         app.router.add_get('/ws', self.websocket_handler)
         app.router.add_get('/api/metrics', self.metrics_handler)
         app.router.add_get('/api/ip', self.ip_handler)  # Get server IP for mobile QR codes
+        app.router.add_get('/api/config', self.config_handler)  # Get detection configuration from .env
         app.router.add_get('/static/{filename}', self.static_handler)
         app.router.add_get('/models/{filename}', self.models_handler)
         app.router.add_get('/qr', self.qr_handler)  # QR code generator endpoint

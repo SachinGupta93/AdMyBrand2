@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🧪 WebRTC Detection Test Suite</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            margin: 0; padding: 20px; background: #f5f5f5; line-height: 1.6;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .test-section { 
+            background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; 
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+        }
+        .test-result {
+            padding: 10px; border-radius: 4px; margin: 10px 0; font-weight: bold;
+        }
+        .test-pass { background: #E8F5E8; color: #2E7D32; }
+        .test-fail { background: #FFEBEE; color: #C62828; }
+        .test-pending { background: #FFF3E0; color: #F57C00; }
+        .btn { 
+            background: #1976D2; color: white; border: none; padding: 12px 24px; 
+            border-radius: 6px; cursor: pointer; margin: 5px; font-size: 14px;
+        }
+        .btn:hover { background: #1565C0; }
+        .btn:disabled { background: #ccc; cursor: not-allowed; }
+        .api-config {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; padding: 20px; border-radius: 12px; margin: 15px 0;
+        }
+        input[type="password"] {
+            padding: 8px; border-radius: 6px; border: 1px solid #ddd;
+            width: 300px; margin-right: 10px;
+        }
+        pre { 
+            background: #263238; color: #fff; padding: 15px; border-radius: 8px; 
+            font-family: monospace; font-size: 12px; overflow-x: auto;
+        }
+        .video-test { position: relative; display: inline-block; margin: 10px; }
+        #testVideo { width: 320px; height: 240px; background: #000; border-radius: 8px; }
+        #testCanvas { position: absolute; top: 0; left: 0; pointer-events: none; }
+        .detection-display {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; border-radius: 12px; padding: 15px; margin: 10px 0;
+        }
+        .detection-item {
+            display: inline-block; background: rgba(255,255,255,0.9); color: #333;
+            padding: 6px 12px; border-radius: 20px; margin: 3px; font-size: 12px; font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧪 WebRTC Object Detection Test Suite</h1>
+            <p>Comprehensive testing for both YOLO and Gemini Vision detection engines</p>
+        </div>
+        
+        <!-- API Configuration -->
+        <div class="test-section">
+            <h2>🔑 API Configuration</h2>
+            <div class="api-config">
+                <h3>OpenRouter API Key for Gemini Vision</h3>
+                <div style="display: flex; align-items: center; flex-wrap: wrap;">
+                    <input type="password" id="test-api-key" placeholder="Enter your OpenRouter API Key">
+                    <button id="save-test-key" class="btn" style="background: white; color: #333;">
+                        💾 Save Key
+                    </button>
+                    <button id="test-connection" class="btn" style="background: rgba(255,255,255,0.2);" disabled>
+                        🧪 Test Connection
+                    </button>
+                </div>
+                <div id="api-test-result" class="test-result test-pending" style="background: rgba(255,255,255,0.1);">
+                    Enter API key to test connection
+                </div>
+            </div>
+        </div>
+
+        <!-- Engine Selection -->
+        <div class="test-section">
+            <h2>⚙️ Detection Engine Selection</h2>
+            <div style="margin: 15px 0;">
+                <label style="margin-right: 20px;">
+                    <input type="radio" name="engine" value="yolo" checked> 
+                    🧠 YOLO (ONNX) - Local Processing
+                </label>
+                <label>
+                    <input type="radio" name="engine" value="gemini"> 
+                    🔥 Gemini Vision - Cloud API
+                </label>
+            </div>
+            <button id="switch-engine" class="btn">🔄 Switch Engine</button>
+            <div id="engine-status" class="test-result test-pending">Select an engine and click Switch Engine</div>
+        </div>
+
+        <!-- Camera Test -->
+        <div class="test-section">
+            <h2>📹 Camera & WebRTC Test</h2>
+            <div class="video-test">
+                <video id="testVideo" autoplay muted playsinline></video>
+                <canvas id="testCanvas" width="320" height="240"></canvas>
+            </div>
+            <div>
+                <button id="start-test-camera" class="btn">📹 Start Camera</button>
+                <button id="stop-test-camera" class="btn" disabled>⏹️ Stop Camera</button>
+                <button id="run-detection-test" class="btn" disabled>🔍 Test Detection</button>
+            </div>
+            <div id="camera-status" class="test-result test-pending">Click Start Camera to test</div>
+        </div>
+
+        <!-- Detection Results -->
+        <div class="test-section">
+            <h2>🎯 Live Detection Results</h2>
+            <div id="detection-display" class="detection-display">
+                <div style="font-weight: bold; margin-bottom: 10px;">Currently Detected Objects:</div>
+                <div id="test-detection-list">No detections yet...</div>
+            </div>
+            <div id="detection-logs" class="test-result test-pending">Start detection test to see results</div>
+        </div>
+
+        <!-- Performance Metrics -->
+        <div class="test-section">
+            <h2>📊 Performance Metrics</h2>
+            <pre id="metrics-display">Metrics will appear here after running detection tests...</pre>
+            <button id="clear-metrics" class="btn">🗑️ Clear Metrics</button>
+        </div>
+
+        <!-- Test Log -->
+        <div class="test-section">
+            <h2>📋 Test Log</h2>
+            <pre id="test-log">Test log will appear here...\n</pre>
+            <button id="clear-log" class="btn">🗑️ Clear Log</button>
+        </div>
+    </div>
+
+    <!-- Include all detection scripts -->
+    <script src="/static/detection_config.js"></script>
+    <script src="/static/gemini_detection.js"></script>
+    <script src="/static/detection.js"></script>
+    
+    <script>
+        // Test Suite Implementation
+        let testVideo, testCanvas, testCtx;
+        let currentEngine = null;
+        let testStream = null;
+        let detectionInterval = null;
+        let testMetrics = { frames: 0, detections: 0, errors: 0, startTime: Date.now() };
+
+        window.addEventListener('load', () => {
+            initializeTestSuite();
+        });
+
+        function initializeTestSuite() {
+            log('🚀 Initializing Test Suite...');
+            
+            // Get DOM elements
+            testVideo = document.getElementById('testVideo');
+            testCanvas = document.getElementById('testCanvas');
+            testCtx = testCanvas.getContext('2d');
+            
+            // Setup event listeners
+            setupEventListeners();
+            
+            // Load existing API key
+            loadExistingAPIKey();
+            
+            log('✅ Test Suite initialized');
+        }
+
+        function setupEventListeners() {
+            document.getElementById('save-test-key').onclick = saveAPIKey;
+            document.getElementById('test-connection').onclick = testAPIConnection;
+            document.getElementById('switch-engine').onclick = switchEngine;
+            document.getElementById('start-test-camera').onclick = startTestCamera;
+            document.getElementById('stop-test-camera').onclick = stopTestCamera;
+            document.getElementById('run-detection-test').onclick = runDetectionTest;
+            document.getElementById('clear-metrics').onclick = clearMetrics;
+            document.getElementById('clear-log').onclick = () => {
+                document.getElementById('test-log').textContent = '';
+            };
+        }
+
+        function loadExistingAPIKey() {
+            const existingKey = localStorage.getItem('openrouter_api_key');
+            const input = document.getElementById('test-api-key');
+            const testBtn = document.getElementById('test-connection');
+            
+            if (existingKey && existingKey !== 'YOUR_OPENROUTER_API_KEY_HERE') {
+                input.value = existingKey.substring(0, 10) + '...';
+                testBtn.disabled = false;
+                updateAPIStatus('✅ API key loaded from storage', 'test-pass');
+            }
+        }
+
+        function saveAPIKey() {
+            const key = document.getElementById('test-api-key').value.trim();
+            if (!key) {
+                updateAPIStatus('❌ Please enter a valid API key', 'test-fail');
+                return;
+            }
+            
+            localStorage.setItem('openrouter_api_key', key);
+            document.getElementById('test-connection').disabled = false;
+            updateAPIStatus('✅ API key saved! Click "Test Connection" to verify.', 'test-pass');
+            log('💾 API key saved to localStorage');
+        }
+
+        async function testAPIConnection() {
+            const key = localStorage.getItem('openrouter_api_key');
+            if (!key) {
+                updateAPIStatus('❌ No API key found', 'test-fail');
+                return;
+            }
+            
+            updateAPIStatus('🧪 Testing API connection...', 'test-pending');
+            log('🧪 Testing Gemini API connection...');
+            
+            try {
+                const testEngine = new GeminiDetectionEngine(key);
+                const success = await testEngine.testConnection();
+                
+                if (success) {
+                    updateAPIStatus('✅ API connection successful! Gemini Vision is ready.', 'test-pass');
+                    log('✅ Gemini API test passed');
+                } else {
+                    updateAPIStatus('❌ API test failed. Check your key and try again.', 'test-fail');
+                    log('❌ Gemini API test failed');
+                }
+            } catch (error) {
+                updateAPIStatus(`❌ API test error: ${error.message}`, 'test-fail');
+                log(`❌ API test error: ${error.message}`);
+            }
+        }
+
+        async function switchEngine() {
+            const selectedEngine = document.querySelector('input[name="engine"]:checked').value;
+            
+            log(`🔄 Switching to ${selectedEngine} engine...`);
+            updateEngineStatus('🔄 Loading engine...', 'test-pending');
+            
+            try {
+                if (selectedEngine === 'gemini') {
+                    const apiKey = localStorage.getItem('openrouter_api_key');
+                    if (!apiKey || apiKey === 'YOUR_OPENROUTER_API_KEY_HERE') {
+                        updateEngineStatus('❌ Please configure OpenRouter API key first', 'test-fail');
+                        return;
+                    }
+                    
+                    currentEngine = new GeminiDetectionEngine(apiKey);
+                    const success = await currentEngine.init();
+                    
+                    if (success) {
+                        updateEngineStatus('✅ Gemini Vision engine loaded successfully', 'test-pass');
+                        log('✅ Gemini engine initialized');
+                    } else {
+                        updateEngineStatus('❌ Failed to load Gemini engine', 'test-fail');
+                        log('❌ Gemini engine failed to initialize');
+                    }
+                } else {
+                    currentEngine = new DetectionEngine();
+                    await currentEngine.init();
+                    updateEngineStatus('✅ YOLO engine loaded successfully', 'test-pass');
+                    log('✅ YOLO engine initialized');
+                }
+            } catch (error) {
+                updateEngineStatus(`❌ Engine error: ${error.message}`, 'test-fail');
+                log(`❌ Engine error: ${error.message}`);
+            }
+        }
+
+        async function startTestCamera() {
+            try {
+                log('📹 Starting test camera...');
+                updateCameraStatus('📹 Starting camera...', 'test-pending');
+                
+                testStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 320, height: 240, facingMode: 'user' },
+                    audio: false
+                });
+                
+                testVideo.srcObject = testStream;
+                
+                document.getElementById('start-test-camera').disabled = true;
+                document.getElementById('stop-test-camera').disabled = false;
+                document.getElementById('run-detection-test').disabled = false;
+                
+                updateCameraStatus('✅ Camera started successfully', 'test-pass');
+                log('✅ Test camera started');
+                
+            } catch (error) {
+                updateCameraStatus(`❌ Camera error: ${error.message}`, 'test-fail');
+                log(`❌ Camera error: ${error.message}`);
+            }
+        }
+
+        function stopTestCamera() {
+            if (testStream) {
+                testStream.getTracks().forEach(track => track.stop());
+                testStream = null;
+                testVideo.srcObject = null;
+            }
+            
+            if (detectionInterval) {
+                clearInterval(detectionInterval);
+                detectionInterval = null;
+            }
+            
+            document.getElementById('start-test-camera').disabled = false;
+            document.getElementById('stop-test-camera').disabled = true;
+            document.getElementById('run-detection-test').disabled = true;
+            
+            updateCameraStatus('⏹️ Camera stopped', 'test-pending');
+            log('⏹️ Test camera stopped');
+        }
+
+        async function runDetectionTest() {
+            if (!currentEngine) {
+                log('❌ No detection engine loaded');
+                return;
+            }
+            
+            log('🔍 Starting detection test...');
+            updateDetectionStatus('🔍 Running detection test...', 'test-pending');
+            
+            testMetrics = { frames: 0, detections: 0, errors: 0, startTime: Date.now() };
+            
+            detectionInterval = setInterval(async () => {
+                try {
+                    // Draw video frame to canvas
+                    testCtx.drawImage(testVideo, 0, 0, 320, 240);
+                    
+                    // Run detection
+                    const startTime = Date.now();
+                    const detections = await currentEngine.detectObjects(null, testCanvas);
+                    const latency = Date.now() - startTime;
+                    
+                    testMetrics.frames++;
+                    testMetrics.detections += detections.length;
+                    
+                    // Draw detection results
+                    if (detections && detections.length > 0) {
+                        currentEngine.drawDetections(testCtx, detections, 320, 240);
+                        
+                        // Update detection display
+                        updateDetectionDisplay(detections);
+                        
+                        log(`🎯 Detected ${detections.length} objects: ${detections.map(d => d.class).join(', ')}`);
+                    }
+                    
+                    // Update metrics
+                    updateTestMetrics(latency, detections.length);
+                    
+                } catch (error) {
+                    testMetrics.errors++;
+                    log(`❌ Detection error: ${error.message}`);
+                }
+            }, 1000); // Test every second
+            
+            updateDetectionStatus('✅ Detection test running (check logs for results)', 'test-pass');
+            
+            // Stop after 30 seconds
+            setTimeout(() => {
+                if (detectionInterval) {
+                    clearInterval(detectionInterval);
+                    detectionInterval = null;
+                    updateDetectionStatus('✅ Detection test completed', 'test-pass');
+                    log('✅ Detection test completed');
+                }
+            }, 30000);
+        }
+
+        function updateDetectionDisplay(detections) {
+            const displayDiv = document.getElementById('test-detection-list');
+            if (!detections || detections.length === 0) {
+                displayDiv.innerHTML = 'No objects detected';
+                return;
+            }
+            
+            // Group by object class
+            const objectCounts = {};
+            detections.forEach(detection => {
+                const className = detection.class || 'unknown';
+                objectCounts[className] = (objectCounts[className] || 0) + 1;
+            });
+            
+            // Create display items
+            const items = Object.entries(objectCounts).map(([className, count]) => {
+                const text = count > 1 ? `${className} (${count})` : className;
+                return `<span class="detection-item">${text}</span>`;
+            });
+            
+            displayDiv.innerHTML = items.join('');
+        }
+
+        function updateTestMetrics(latency, detectionCount) {
+            const runtime = (Date.now() - testMetrics.startTime) / 1000;
+            const fps = testMetrics.frames / runtime;
+            const avgDetections = testMetrics.detections / testMetrics.frames;
+            
+            const metricsDisplay = document.getElementById('metrics-display');
+            metricsDisplay.textContent = `
+Runtime: ${runtime.toFixed(1)}s
+Frames Processed: ${testMetrics.frames}
+Total Detections: ${testMetrics.detections}
+Detection Errors: ${testMetrics.errors}
+Average FPS: ${fps.toFixed(2)}
+Avg Detections/Frame: ${avgDetections.toFixed(2)}
+Last Frame Latency: ${latency}ms
+            `.trim();
+        }
+
+        function clearMetrics() {
+            document.getElementById('metrics-display').textContent = 'Metrics cleared...';
+            testMetrics = { frames: 0, detections: 0, errors: 0, startTime: Date.now() };
+        }
+
+        // Helper functions for UI updates
+        function updateAPIStatus(message, className) {
+            const div = document.getElementById('api-test-result');
+            div.textContent = message;
+            div.className = `test-result ${className}`;
+        }
+
+        function updateEngineStatus(message, className) {
+            const div = document.getElementById('engine-status');
+            div.textContent = message;
+            div.className = `test-result ${className}`;
+        }
+
+        function updateCameraStatus(message, className) {
+            const div = document.getElementById('camera-status');
+            div.textContent = message;
+            div.className = `test-result ${className}`;
+        }
+
+        function updateDetectionStatus(message, className) {
+            const div = document.getElementById('detection-logs');
+            div.textContent = message;
+            div.className = `test-result ${className}`;
+        }
+
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            const logDiv = document.getElementById('test-log');
+            logDiv.textContent += `[${timestamp}] ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+    </script>
+</body>
+</html>

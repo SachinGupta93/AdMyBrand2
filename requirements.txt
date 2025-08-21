@@ -10,3 +10,4 @@ python-socketio==5.10.0
 qrcode[pil]==7.4.2
 psutil==5.9.6
 asyncio-mqtt==0.16.1
+python-dotenv==1.0.0

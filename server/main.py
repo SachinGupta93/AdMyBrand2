@@ -78,6 +78,29 @@ class DetectionServer:
         
         return base64.b64encode(buffer.getvalue()).decode()
 
+    async def qr_handler(self, request):
+        """Serve a QR PNG for the given `data` or `text` query param (same-origin)."""
+        data = request.query.get('data') or request.query.get('text')
+        if not data:
+            # default to root/demo URL
+            local_ip = self.get_local_ip()
+            protocol = 'https' if self.use_https else 'http'
+            port = self.https_port if self.use_https else self.port
+            data = f"{protocol}://{local_ip}:{port}/demo"
+
+        try:
+            qr = qrcode.QRCode(version=1, box_size=10, border=4)
+            qr.add_data(data)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white")
+            buf = BytesIO()
+            img.save(buf, format='PNG')
+            buf.seek(0)
+            return web.Response(body=buf.getvalue(), content_type='image/png')
+        except Exception as e:
+            logger.error(f"QR generation error: {e}")
+            return web.Response(status=500, text='QR generation failed')
+
     async def websocket_handler(self, request):
         """Handle WebSocket connections for signaling and data"""
         ws = web.WebSocketResponse()
@@ -273,6 +296,22 @@ class DetectionServer:
         else:
             return web.Response(status=404, text="File not found")
 
+    async def models_handler(self, request):
+        """Serve model files from the ./models directory"""
+        filename = request.match_info['filename']
+        models_dir = Path(__file__).parent.parent / 'models'
+        file_path = models_dir / filename
+
+        if file_path.exists():
+            return web.FileResponse(file_path)
+        else:
+            return web.Response(status=404, text="Model not found")
+
+    async def ip_handler(self, request):
+        """Return server's local IP address for mobile QR codes"""
+        local_ip = self.get_local_ip()
+        return web.json_response({'ip': local_ip})
+    
     async def metrics_handler(self, request):
         """API endpoint for metrics"""
         metrics = self.metrics_collector.get_current_metrics()
@@ -303,15 +342,30 @@ class DetectionServer:
     def create_app(self):
         """Create the web application"""
         app = web.Application()
-        
+
+        # Add security middleware to enable cross-origin isolation (needed for wasm threads / SharedArrayBuffer)
+        @web.middleware
+        async def security_middleware(request, handler):
+            response = await handler(request)
+            # These headers enable crossOriginIsolated in supporting browsers when all resources allow it
+            response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
+            response.headers['Cross-Origin-Embedder-Policy'] = 'require-corp'
+            return response
+
+        app.middlewares.append(security_middleware)
+
         # Routes
-        app.router.add_get('/', self.landing_handler)  # Landing page for protocol selection
+        app.router.add_get('/', self.root_handler)  # Serve main camera UI at root
+        app.router.add_get('/landing', self.landing_handler)  # Landing page for protocol selection
         app.router.add_get('/demo', self.index_handler)  # Main demo page
         app.router.add_get('/ws', self.websocket_handler)
         app.router.add_get('/api/metrics', self.metrics_handler)
+        app.router.add_get('/api/ip', self.ip_handler)  # Get server IP for mobile QR codes
         app.router.add_get('/static/{filename}', self.static_handler)
+        app.router.add_get('/models/{filename}', self.models_handler)
+        app.router.add_get('/qr', self.qr_handler)  # QR code generator endpoint
         app.router.add_get('/test', self.mobile_test_handler)  # Mobile test page
-        
+
         return app
 
     async def landing_handler(self, request):
@@ -331,6 +385,17 @@ class DetectionServer:
         else:
             return web.Response(status=404, text="Landing page not found")
 
+    async def root_handler(self, request):
+        """Serve the main camera UI (index.html) at the root path '/'"""
+        static_dir = Path(__file__).parent.parent / 'static'
+        index_file = static_dir / 'index.html'
+
+        if index_file.exists():
+            return web.FileResponse(index_file)
+        else:
+            # Fallback to the demo handler if static index is missing
+            return await self.index_handler(request)
+
     async def mobile_test_handler(self, request):
         """Serve mobile camera test page"""
         static_dir = Path(__file__).parent.parent / 'static'
@@ -347,19 +412,40 @@ class DetectionServer:
         
         runner = web.AppRunner(app)
         await runner.setup()
-        
         # Start HTTP server (for fallback/development)
-        http_site = web.TCPSite(runner, self.host, self.port)
-        await http_site.start()
-        logger.info(f"🌐 HTTP Server running on http://{self.host}:{self.port}")
-        
+        try:
+            http_site = web.TCPSite(runner, self.host, self.port)
+            await http_site.start()
+            logger.info(f"🌐 HTTP Server running on http://{self.host}:{self.port}")
+        except OSError as e:
+            logger.warning(f"⚠️ Could not bind HTTP port {self.port}: {e}")
+            # Find a free ephemeral port and retry
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind((self.host, 0))
+                free_port = s.getsockname()[1]
+            self.port = free_port
+            http_site = web.TCPSite(runner, self.host, self.port)
+            await http_site.start()
+            logger.info(f"🌐 HTTP Server running on http://{self.host}:{self.port} (auto-selected)")
+
         # Start HTTPS server if enabled
         if self.use_https:
             ssl_context = self.create_ssl_context()
             if ssl_context:
-                https_site = web.TCPSite(runner, self.host, self.https_port, ssl_context=ssl_context)
-                await https_site.start()
-                logger.info(f"🔐 HTTPS Server running on https://{self.host}:{self.https_port}")
+                try:
+                    https_site = web.TCPSite(runner, self.host, self.https_port, ssl_context=ssl_context)
+                    await https_site.start()
+                    logger.info(f"🔐 HTTPS Server running on https://{self.host}:{self.https_port}")
+                except OSError as e:
+                    logger.warning(f"⚠️ Could not bind HTTPS port {self.https_port}: {e}")
+                    # Find a free ephemeral port and retry for HTTPS
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.bind((self.host, 0))
+                        free_https = s.getsockname()[1]
+                    self.https_port = free_https
+                    https_site = web.TCPSite(runner, self.host, self.https_port, ssl_context=ssl_context)
+                    await https_site.start()
+                    logger.info(f"🔐 HTTPS Server running on https://{self.host}:{self.https_port} (auto-selected)")
                 
                 local_ip = self.get_local_ip()
                 logger.info(f"📱 Mobile URL (HTTPS): https://{local_ip}:{self.https_port}")

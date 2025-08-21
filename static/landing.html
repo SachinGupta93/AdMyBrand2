@@ -71,19 +71,6 @@
             </div>
         </div>
 
-        <!-- QR Code Section -->
-        <div class="device-section">
-            <h2>📷 Scan QR Code</h2>
-            <p>Scan with your phone camera to open HTTPS version</p>
-            <div class="qr-code">
-                <img id="qrCode" src="" alt="Loading QR Code..." style="max-width: 200px;">
-            </div>
-            <div class="info">
-                📱 Point your phone camera at the QR code<br>
-                🔗 Automatically opens HTTPS version for camera access
-            </div>
-        </div>
-
         <!-- Status and Info -->
         <div class="info warning">
             <strong>⚠️ Important:</strong><br>
@@ -97,6 +84,14 @@
             • Click "Advanced" → "Proceed to site" if warned<br>
             • Add security exception in browser settings if needed
         </div>
+        
+        <!-- Quick action: navigate to camera/index page -->
+        <div style="margin-top:20px;">
+            <a href="index.html" class="btn primary" id="openCameraBtn">🎯 Open Camera Page</a>
+            <div class="info" style="display:inline-block; margin-left:10px; vertical-align:middle;">
+                Tap to open the main camera & detection UI (opens on the same host and port).
+            </div>
+        </div>
     </div>
 
     <script>
@@ -106,13 +101,7 @@
         const httpUrl = `http://${currentHost}:3000/`;
         
         document.getElementById('httpsLink').href = httpsUrl;
-        document.getElementById('httpLink').href = httpUrl;
-        
-        // Generate QR code
-        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(httpsUrl)}`;
-        document.getElementById('qrCode').src = qrUrl;
-        
-        // Auto-redirect mobile devices to HTTPS
+        document.getElementById('httpLink').href = httpUrl;        // Auto-redirect mobile devices to HTTPS
         const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         if (isMobile && window.location.protocol === 'http:') {
             // Show redirect notice
@@ -130,6 +119,15 @@
         console.log('🚀 WebRTC Demo URLs:');
         console.log('📱 Mobile (HTTPS):', httpsUrl);
         console.log('💻 Desktop (HTTP):', httpUrl);
+
+        // Ensure the Open Camera button navigates to the same host/port (works for HTTP and HTTPS)
+        try {
+            const indexUrl = `${window.location.protocol}//${currentHost}${window.location.port ? ':' + window.location.port : ''}/index.html`;
+            const openBtn = document.getElementById('openCameraBtn');
+            if (openBtn) openBtn.href = indexUrl;
+        } catch (e) {
+            // noop
+        }
     </script>
 </body>
 </html>

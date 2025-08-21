@@ -8,7 +8,6 @@ let localVideo, overlayCanvas, ctx, ws, pc;
 let localStream = null;
 let isConnected = false;
 let detectionActive = false;
-let detectionEngine = null;
 
 // WebRTC Configuration
 const configuration = {
@@ -40,33 +39,18 @@ function initializeApp() {
     if (startBtn) startBtn.onclick = startCamera;
     if (stopBtn) stopBtn.onclick = stopCamera;
     if (benchBtn) benchBtn.onclick = runBenchmark;
-
-    // Disable start button and show loading status
-    if (startBtn) {
-        startBtn.disabled = true;
-    }
-    updateStatus('🧠 Loading AI Model...');
-
-    // Load model in the background
-    loadModelAndEnableCamera();
     
-    // Connect WebSocket and load QR code immediately
+    // Connect WebSocket
     connectWebSocket();
+    
+    // Load QR code
     loadQRCodeAndURL();
-}
-
-async function loadModelAndEnableCamera() {
-    console.log('⏳ Initializing detection engine in background...');
-    detectionEngine = new DetectionEngine();
-    await detectionEngine.init();
-    console.log('✅ Detection engine ready.');
     
-    const startBtn = document.getElementById('startBtn');
-    if (startBtn) {
-        startBtn.disabled = false;
+    // Auto-start on mobile
+    if (isMobile()) {
+        console.log('📱 Mobile device detected');
+        updateStatus('🔴 Tap "Start Camera" to begin');
     }
-    
-    updateStatus('� Ready. Click "Start Camera"');
 }
 
 function isMobile() {
@@ -74,53 +58,22 @@ function isMobile() {
 }
 
 function loadQRCodeAndURL() {
-    // For mobile access, we need to use the actual server IP, not localhost
-    // Get the current URL but replace localhost with the server's IP
-    let protocol = window.location.protocol;
-    let host = window.location.hostname;
-    let port = window.location.port;
-    
-    // If we're on localhost, try to get the actual IP from the server
-    if (host === 'localhost' || host === '127.0.0.1') {
-        // Use HTTPS for mobile camera access
-        protocol = 'https:';
-        port = '3443';
-        // The server logs show the IP as 172.20.19.211, but we'll make it dynamic
-        host = window.location.hostname; // We'll update this via server endpoint
-    }
-    
+    const protocol = window.location.protocol;
+    const host = window.location.hostname;
+    const port = window.location.port;
     const url = `${protocol}//${host}${port ? ':' + port : ''}`;
     
     // Update URL display
     const phoneUrlElement = document.getElementById('phone-url');
     if (phoneUrlElement) {
-        phoneUrlElement.innerHTML = `<strong>Mobile URL (HTTPS):</strong> <code>https://${host === 'localhost' ? '[IP-ADDRESS]' : host}:3443</code><br>
-                                     <strong>Desktop URL (HTTP):</strong> <code>http://${host === 'localhost' ? '[IP-ADDRESS]' : host}:3000</code>`;
+        phoneUrlElement.innerHTML = `<strong>URL:</strong> <code>${url}</code>`;
     }
     
-    // Generate QR code using same-origin endpoint to avoid COEP/COOP blocks
-    // For QR, always use HTTPS for mobile camera access
+    // Generate QR code
     const qrCodeElement = document.getElementById('qr-code');
     if (qrCodeElement) {
-        // Request QR with mobile-friendly HTTPS URL - let server determine the IP
-        fetch('/api/ip')
-            .then(response => response.json())
-            .then(data => {
-                const mobileUrl = `https://${data.ip}:3443`;
-                const qrUrl = `/qr?data=${encodeURIComponent(mobileUrl)}`;
-                qrCodeElement.innerHTML = `<img src="${qrUrl}" alt="QR Code for Mobile" style="max-width: 200px; border-radius: 8px;">`;
-                
-                // Update URL display with actual IP
-                if (phoneUrlElement) {
-                    phoneUrlElement.innerHTML = `<strong>Mobile URL (HTTPS):</strong> <code>https://${data.ip}:3443</code><br>
-                                                 <strong>Desktop URL (HTTP):</strong> <code>http://${data.ip}:3000</code>`;
-                }
-            })
-            .catch(error => {
-                console.warn('Could not get server IP, using current URL:', error);
-                const qrUrl = `/qr?data=${encodeURIComponent(url)}`;
-                qrCodeElement.innerHTML = `<img src="${qrUrl}" alt="QR Code" style="max-width: 200px; border-radius: 8px;">`;
-            });
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`;
+        qrCodeElement.innerHTML = `<img src="${qrUrl}" alt="QR Code" style="max-width: 200px; border-radius: 8px;">`;
     }
 }
 
@@ -397,33 +350,20 @@ async function createPeerConnection() {
 }
 
 function startDetection() {
-    if (detectionActive || !detectionEngine) return;
+    if (detectionActive) return;
     
     detectionActive = true;
-    console.log('🧠 Starting object detection...');
+    console.log('🧠 Starting mock object detection');
     
-    detectionInterval = setInterval(async () => {
-        if (!ctx || !localVideo.videoWidth || !detectionEngine.isLoaded) return;
+    // Simple mock detection for demo
+    detectionInterval = setInterval(() => {
+        if (!ctx || !localVideo.videoWidth) return;
         
-        // Capture frame
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = localVideo.videoWidth;
-        tempCanvas.height = localVideo.videoHeight;
-        const tempCtx = tempCanvas.getContext('2d');
-        tempCtx.drawImage(localVideo, 0, 0, tempCanvas.width, tempCanvas.height);
-        const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        // Generate mock detections
+        const detections = generateMockDetections();
+        drawDetections(detections);
         
-        // Detect objects
-        const detections = await detectionEngine.detectObjects(imageData, overlayCanvas);
-        
-        // Clear and draw
-        ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-        detectionEngine.drawDetections(ctx, detections, overlayCanvas.width, overlayCanvas.height);
-        
-        // Update metrics
-        updateMetrics(detectionEngine.getMetrics());
-        
-    }, 1000 / 15); // ~15 FPS
+    }, 200); // 5 FPS detection
 }
 
 function generateMockDetections() {

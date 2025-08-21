@@ -14,6 +14,7 @@ import time
 from io import BytesIO
 import base64
 import socket
+import ssl
 
 import aiohttp
 from aiohttp import web, WSMsgType
@@ -38,7 +39,9 @@ class DetectionServer:
         self.mode = os.getenv('MODE', 'wasm').lower()
         self.host = '0.0.0.0'
         self.port = 3000
+        self.https_port = 3443  # HTTPS port
         self.ws_port = 8765
+        self.use_https = os.getenv('HTTPS', 'true').lower() == 'true'
         
         # Initialize components
         self.webrtc_handler = WebRTCHandler()
@@ -49,6 +52,8 @@ class DetectionServer:
         self.websockets = set()
         
         logger.info(f"🚀 Initializing DetectionServer in {self.mode.upper()} mode")
+        if self.use_https:
+            logger.info("🔐 HTTPS enabled for mobile camera support")
 
     def get_local_ip(self):
         """Get local IP address"""
@@ -167,7 +172,12 @@ class DetectionServer:
         """Serve the main page"""
         # Generate QR code for current URL - use dynamic local IP
         local_ip = self.get_local_ip()
-        current_url = f"http://{local_ip}:3000/"
+        
+        # Use HTTPS if enabled, otherwise HTTP
+        protocol = 'https' if self.use_https else 'http'
+        port = self.https_port if self.use_https else self.port
+        current_url = f"{protocol}://{local_ip}:{port}/demo"
+        
         qr_code = self.generate_qr_code(current_url)
         
         html_content = f"""
@@ -268,18 +278,58 @@ class DetectionServer:
         metrics = self.metrics_collector.get_current_metrics()
         return web.json_response(metrics)
 
+    def create_ssl_context(self):
+        """Create SSL context for HTTPS"""
+        try:
+            ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            
+            # Path to certificate files
+            cert_file = Path(__file__).parent.parent / 'certs' / 'localhost.crt'
+            key_file = Path(__file__).parent.parent / 'certs' / 'localhost.key'
+            
+            if not cert_file.exists() or not key_file.exists():
+                logger.error("❌ SSL certificate files not found!")
+                logger.info("💡 Run: python generate_cert.py")
+                return None
+                
+            ssl_context.load_cert_chain(str(cert_file), str(key_file))
+            logger.info("✅ SSL context created successfully")
+            return ssl_context
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to create SSL context: {e}")
+            return None
+
     def create_app(self):
         """Create the web application"""
         app = web.Application()
         
         # Routes
-        app.router.add_get('/', self.index_handler)
+        app.router.add_get('/', self.landing_handler)  # Landing page for protocol selection
+        app.router.add_get('/demo', self.index_handler)  # Main demo page
         app.router.add_get('/ws', self.websocket_handler)
         app.router.add_get('/api/metrics', self.metrics_handler)
         app.router.add_get('/static/{filename}', self.static_handler)
         app.router.add_get('/test', self.mobile_test_handler)  # Mobile test page
         
         return app
+
+    async def landing_handler(self, request):
+        """Serve landing page to help users choose HTTP/HTTPS"""
+        static_dir = Path(__file__).parent.parent / 'static'
+        landing_file = static_dir / 'landing.html'
+        
+        if landing_file.exists():
+            # Read the file and replace placeholders with actual IPs
+            with open(landing_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            local_ip = self.get_local_ip()
+            content = content.replace('172.20.19.211', local_ip)
+            
+            return web.Response(text=content, content_type='text/html')
+        else:
+            return web.Response(status=404, text="Landing page not found")
 
     async def mobile_test_handler(self, request):
         """Serve mobile camera test page"""
@@ -298,12 +348,27 @@ class DetectionServer:
         runner = web.AppRunner(app)
         await runner.setup()
         
-        site = web.TCPSite(runner, self.host, self.port)
-        await site.start()
+        # Start HTTP server (for fallback/development)
+        http_site = web.TCPSite(runner, self.host, self.port)
+        await http_site.start()
+        logger.info(f"🌐 HTTP Server running on http://{self.host}:{self.port}")
         
-        logger.info(f"🌐 Server running on http://{self.host}:{self.port}")
+        # Start HTTPS server if enabled
+        if self.use_https:
+            ssl_context = self.create_ssl_context()
+            if ssl_context:
+                https_site = web.TCPSite(runner, self.host, self.https_port, ssl_context=ssl_context)
+                await https_site.start()
+                logger.info(f"🔐 HTTPS Server running on https://{self.host}:{self.https_port}")
+                
+                local_ip = self.get_local_ip()
+                logger.info(f"📱 Mobile URL (HTTPS): https://{local_ip}:{self.https_port}")
+                logger.info(f"� Desktop URL (HTTP): http://{local_ip}:{self.port}")
+            else:
+                logger.warning("⚠️ HTTPS disabled due to SSL context creation failure")
+                self.use_https = False
+        
         logger.info(f"📱 Mode: {self.mode.upper()}")
-        logger.info(f"🔗 Phone URL: http://{self.host}:{self.port}")
         
         # Keep server running
         try:

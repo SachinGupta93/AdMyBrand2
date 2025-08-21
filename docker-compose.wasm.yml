@@ -1,0 +1,26 @@
+services:
+  webrtc-detection:
+    build: 
+      context: .
+      dockerfile: Dockerfile.wasm
+    image: admybrand-webrtc-detection-wasm:latest
+    container_name: webrtc-detection-wasm-app
+    ports:
+      - "3000:3000"
+      - "3443:3443"
+    environment:
+      - DETECTION_ENGINE=gemini
+      - DEBUG=false
+      - PORT=3000
+      - HTTPS_PORT=3443
+      - MODE=wasm
+    volumes:
+      - ./logs:/app/logs
+      - ./.env:/app/.env
+    restart: unless-stopped
+    networks:
+      - webrtc-net
+
+networks:
+  webrtc-net:
+    driver: bridge

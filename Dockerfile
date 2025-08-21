@@ -1,53 +1,39 @@
-# Multi-stage build for WebRTC VLM Object Detection
-FROM node:18-alpine AS frontend-builder
+FROM python:3.11-slim
 
-WORKDIR /app/frontend
-COPY frontend/package*.json ./
-RUN npm ci --only=production
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 
-COPY frontend/ ./
-RUN npm run build
-
-FROM python:3.9-slim AS server
-
-# Install system dependencies
+# Install system dependencies including those needed for ONNX Runtime
 RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    libgomp1 \
+    curl \
     wget \
+    gcc \
+    g++ \
+    libgomp1 \
+    libgfortran5 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy requirements and install Python dependencies
+# Copy requirements first for better caching
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy server code
-COPY server/ ./server/
-COPY models/ ./models/
+# Install Python dependencies with specific ONNX Runtime version
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy built frontend
-COPY --from=frontend-builder /app/frontend/dist ./static/
+# Copy application files
+COPY . .
 
-# Download model if not present
-RUN python -c
-# "import os
-# import urllib.request
-# if not os.path.exists('./models/yolov5n.onnx'):
-#     os.makedirs('./models', exist_ok=True)
-#     print('Downloading YOLOv5n model...')
-#     urllib.request.urlretrieve(
-#         'https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5n.onnx',
-#         './models/yolov5n.onnx'
-#     )
-#     print('Model downloaded successfully')
-# "
+# Create necessary directories
+RUN mkdir -p models static logs metrics
 
-EXPOSE 3000 8765
+# Download YOLOv5 model if not present
+RUN python -c "import os, urllib.request; \
+    os.makedirs('./models', exist_ok=True) if not os.path.exists('./models/yolov5n.onnx') else None; \
+    urllib.request.urlretrieve('https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5n.onnx', './models/yolov5n.onnx') if not os.path.exists('./models/yolov5n.onnx') else print('Model already exists')"
+
+EXPOSE 3000 3443
 
 CMD ["python", "server/main.py"]

@@ -1,37 +1,31 @@
 services:
   webrtc-detection:
-    build: .
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    image: admybrand-webrtc-detection:latest
+    container_name: webrtc-detection-app
     ports:
       - "3000:3000"
-      - "8765:8765"
+      - "3443:3443"
     environment:
-      - MODE=${MODE:-wasm}
+      - DETECTION_ENGINE=${DETECTION_ENGINE:-yolo}
       - DEBUG=${DEBUG:-false}
-      - NGROK_ENABLED=${NGROK_ENABLED:-false}
+      - PORT=3000
+      - HTTPS_PORT=3443
+      - OMP_NUM_THREADS=1
+    security_opt:
+      - seccomp:unconfined
+    cap_add:
+      - SYS_PTRACE
     volumes:
       - ./metrics:/app/metrics
       - ./logs:/app/logs
+      - ./.env:/app/.env
+    restart: unless-stopped
     networks:
       - webrtc-net
-
-  # Optional ngrok service for external access
-  ngrok:
-    image: ngrok/ngrok:3-alpine
-    profiles: ["ngrok"]
-    command: http webrtc-detection:3000
-    environment:
-      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN:-}
-    ports:
-      - "4040:4040"
-    networks:
-      - webrtc-net
-    depends_on:
-      - webrtc-detection
 
 networks:
   webrtc-net:
     driver: bridge
-
-volumes:
-  metrics:
-  logs:

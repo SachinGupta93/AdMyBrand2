@@ -1,0 +1,37 @@
+services:
+  webrtc-detection:
+    build: .
+    ports:
+      - "3000:3000"
+      - "8765:8765"
+    environment:
+      - MODE=${MODE:-wasm}
+      - DEBUG=${DEBUG:-false}
+      - NGROK_ENABLED=${NGROK_ENABLED:-false}
+    volumes:
+      - ./metrics:/app/metrics
+      - ./logs:/app/logs
+    networks:
+      - webrtc-net
+
+  # Optional ngrok service for external access
+  ngrok:
+    image: ngrok/ngrok:3-alpine
+    profiles: ["ngrok"]
+    command: http webrtc-detection:3000
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN:-}
+    ports:
+      - "4040:4040"
+    networks:
+      - webrtc-net
+    depends_on:
+      - webrtc-detection
+
+networks:
+  webrtc-net:
+    driver: bridge
+
+volumes:
+  metrics:
+  logs:
